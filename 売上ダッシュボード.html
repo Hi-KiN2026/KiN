@@ -960,26 +960,35 @@ document.getElementById("dataset-reset-btn").addEventListener("click", () => {
 
 // ---- 起動時: サーバー（serve_dashboard.py）経由なら同じフォルダのCSVを自動で読み込む。
 //      file:// で直接開いた場合や失敗した場合は何もせず、ファイル選択を待つ ----
-async function tryAutoLoadServerFiles() {
-  if (!location.protocol.startsWith("http")) return;
+// /api/csv-list（serve_dashboard.py 経由の動的一覧）→ 無ければ csv-list.json（GitHub Pages 等の静的ホスティング用マニフェスト）の順で試す
+async function fetchCsvFileList() {
   try {
     const res = await fetch("/api/csv-list", { cache: "no-store" });
-    if (!res.ok) return;
-    const files = await res.json();
-    for (const f of files) {
-      try {
-        const key = f.replace(/\.csv$/i, "");
-        if (DATASETS.some(d => d.key === key)) continue; // 復元済みのものは上書きしない
-        const r = await fetch(f, { cache: "no-store" });
-        if (!r.ok) continue;
-        const text = await r.text();
-        const rows = parseCSV(text);
-        if (!rows.length) continue;
-        DATASETS.push({ key, label: key, rows });
-        selectedKeys.add(key);
-      } catch (e) { /* このファイルはスキップ */ }
-    }
-  } catch (e) { /* サーバー未使用（file:// など）: 何もしない */ }
+    if (res.ok) return await res.json();
+  } catch (e) { /* サーバー未使用: 次のフォールバックへ */ }
+  try {
+    const res = await fetch("csv-list.json", { cache: "no-store" });
+    if (res.ok) return await res.json();
+  } catch (e) { /* 静的マニフェストも無し */ }
+  return [];
+}
+
+async function tryAutoLoadServerFiles() {
+  if (!location.protocol.startsWith("http")) return;
+  const files = await fetchCsvFileList();
+  for (const f of files) {
+    try {
+      const key = f.replace(/\.csv$/i, "");
+      if (DATASETS.some(d => d.key === key)) continue; // 復元済みのものは上書きしない
+      const r = await fetch(f, { cache: "no-store" });
+      if (!r.ok) continue;
+      const text = await r.text();
+      const rows = parseCSV(text);
+      if (!rows.length) continue;
+      DATASETS.push({ key, label: key, rows });
+      selectedKeys.add(key);
+    } catch (e) { /* このファイルはスキップ */ }
+  }
 }
 
 (async () => {
