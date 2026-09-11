@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>売上ダッシュボード</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+    --series-1-wash:  rgba(42,120,214,0.10);
+    --series-1-hover: #1c5cab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-1-wash:  rgba(57,135,229,0.14);
+      --series-1-hover: #5598e7;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page-plane:     #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-1-wash:  rgba(57,135,229,0.14);
+    --series-1-hover: #5598e7;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page-plane); }
+  .viz-root {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+    background: var(--page-plane);
+    padding: 32px 24px 64px;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header.page-head { margin-bottom: 28px; }
+  header.page-head h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  header.page-head p { font-size: 14px; color: var(--text-secondary); margin: 0; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .stat-tile .label { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+  .stat-tile .value { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .stat-tile .unit { font-size: 14px; font-weight: 400; color: var(--text-secondary); margin-left: 2px; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px 12px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 16px; font-weight: 600; margin: 0 0 2px; }
+  .card .sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
+
+  svg { display: block; overflow: visible; }
+  .axis-label { font-size: 11px; fill: var(--text-muted); }
+  .value-label { font-size: 12px; font-weight: 600; fill: var(--text-primary); }
+  .grid-line { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+
+  .bar-col { fill: var(--series-1); cursor: pointer; transition: fill .1s ease; }
+  .bar-col:hover, .bar-col.active { fill: var(--series-1-hover); }
+  .bar-row { fill: var(--series-1); cursor: pointer; transition: fill .1s ease; }
+  .bar-row:hover, .bar-row.active { fill: var(--series-1-hover); }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    opacity: 0;
+    transition: opacity .08s ease;
+    z-index: 10;
+    white-space: nowrap;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .t-name { color: var(--text-secondary); margin-bottom: 3px; }
+  .tooltip .t-value { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .tooltip .t-sub { color: var(--text-muted); margin-top: 2px; }
+
+  table.rank-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  table.rank-table th, table.rank-table td {
+    text-align: left;
+    padding: 9px 8px;
+    border-bottom: 1px solid var(--gridline);
+  }
+  table.rank-table th {
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 12px;
+  }
+  table.rank-table td.num, table.rank-table th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  table.rank-table tr:last-child td { border-bottom: none; }
+  table.rank-table td.rank { color: var(--text-muted); width: 28px; }
+
+  .chart-wrap { position: relative; }
+
+  .empty-state {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  /* ---- Filter bar ---- */
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+  }
+  .filter-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .filter-group .fg-label { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
+
+  .preset-pill {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .preset-pill:hover { border-color: var(--series-1); color: var(--text-primary); }
+  .preset-pill.active {
+    background: var(--series-1);
+    border-color: var(--series-1);
+    color: #fff;
+  }
+
+  .date-input {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+  }
+  .date-sep { color: var(--text-muted); font-size: 12px; }
+
+  .cat-check {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+  }
+  .cat-check:hover { border-color: var(--border); }
+  .cat-check input { accent-color: var(--series-1); cursor: pointer; }
+
+  .reset-link {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-left: auto;
+  }
+  .reset-link:hover { color: var(--text-primary); }
+
+  .text-btn {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 2px;
+  }
+  .text-btn:hover { color: var(--text-primary); }
+
+  .dropzone {
+    font-size: 12px;
+    color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: 999px;
+    padding: 5px 14px;
+    transition: border-color .1s ease, color .1s ease, background-color .1s ease;
+    user-select: none;
+  }
+  .dropzone.drag-over {
+    border-color: var(--series-1);
+    color: var(--text-primary);
+    background: var(--series-1-wash);
+  }
+
+  @media (max-width: 720px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .filter-bar { flex-direction: column; align-items: stretch; }
+    .reset-link { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="wrap">
+
+    <header class="page-head">
+      <h1>売上ダッシュボード</h1>
+      <p id="period-label">対象期間: 2026-01-01 〜 2026-03-31</p>
+    </header>
+
+    <div class="filter-bar">
+      <div class="filter-group" id="dataset-group">
+        <span class="fg-label">データセット</span>
+      </div>
+      <button class="preset-pill" id="open-file-btn" type="button">＋ CSVファイルを開く</button>
+      <div class="dropzone" id="dropzone">ここにCSVをドラッグ&ドロップ</div>
+      <input type="file" id="file-input" accept=".csv,text/csv" multiple hidden>
+      <button class="reset-link" id="dataset-reset-btn">データリセット</button>
+    </div>
+
+    <div class="filter-bar">
+      <div class="filter-group" id="preset-group">
+        <span class="fg-label">期間</span>
+      </div>
+      <div class="filter-group">
+        <input type="date" class="date-input" id="date-from">
+        <span class="date-sep">〜</span>
+        <input type="date" class="date-input" id="date-to">
+      </div>
+      <div class="filter-group" id="category-group">
+        <span class="fg-label">カテゴリ</span>
+      </div>
+      <button class="reset-link" id="reset-btn">リセット</button>
+    </div>
+
+    <div class="empty-state" id="load-error" hidden></div>
+
+    <div class="stat-grid" id="stat-grid"></div>
+
+    <div class="card">
+      <h2>月別売上推移</h2>
+      <p class="sub">月ごとの売上金額合計</p>
+      <div class="chart-wrap" id="monthly-chart"></div>
+    </div>
+
+    <div class="card">
+      <h2>商品別売上ランキング</h2>
+      <p class="sub">売上金額の高い順</p>
+      <div class="chart-wrap" id="product-chart"></div>
+      <table class="rank-table" id="product-table">
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th>商品名</th>
+            <th>カテゴリ</th>
+            <th class="num">売上金額</th>
+            <th class="num">数量</th>
+            <th class="num">構成比</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ---- データセット: 「＋ CSVファイルを開く」で選んだファイルをその場で読み込む ----
+// （サーバーにファイルがあれば起動時に自動でも読み込む。無くてもファイル選択だけで動作する）
+let DATASETS = [];
+
+// ---- 取引データ: [日付, 商品名, カテゴリ, 数量, 売上金額] ----
+let ROWS = [];
+let PERIOD_MIN = null;
+let PERIOD_MAX = null;
+let ALL_CATEGORIES = [];
+let MONTH_PRESETS = [];
+let selectedKeys = new Set(); // 選択中のデータセット（複数選択可）
+
+const state = {
+  from: null,
+  to: null,
+  categories: new Set()
+};
+
+const NS = "http://www.w3.org/2000/svg";
+const fmtYen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
+const fmtCompact = n => {
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + "万円";
+  return n.toLocaleString("ja-JP") + "円";
+};
+
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+// ---- Tooltip ----
+const tooltip = document.getElementById("tooltip");
+function showTooltip(evt, rows) {
+  tooltip.innerHTML = "";
+  rows.forEach((r, i) => {
+    const line = document.createElement("div");
+    if (i === 0) {
+      line.className = "t-name";
+      line.textContent = r;
+    } else if (r.strong) {
+      line.className = "t-value";
+      line.textContent = r.text;
+    } else {
+      line.className = "t-sub";
+      line.textContent = r.text;
+    }
+    tooltip.appendChild(line);
+  });
+  tooltip.classList.add("show");
+  positionTooltip(evt);
+}
+function positionTooltip(evt) {
+  const pad = 14;
+  let x = evt.clientX + pad + window.scrollX;
+  let y = evt.clientY + pad + window.scrollY;
+  const rect = tooltip.getBoundingClientRect();
+  if (evt.clientX + pad + rect.width > window.innerWidth) {
+    x = evt.clientX - pad - rect.width + window.scrollX;
+  }
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+}
+function hideTooltip() { tooltip.classList.remove("show"); }
+
+// ---- Stat tiles ----
+function renderStats(summary) {
+  const grid = document.getElementById("stat-grid");
+  grid.innerHTML = "";
+  const tiles = [
+    { label: "総売上金額", value: fmtYen(summary.totalSales) },
+    { label: "総販売数量", value: summary.totalQty.toLocaleString("ja-JP"), unit: "点" },
+    { label: "総取引件数", value: summary.totalCount.toLocaleString("ja-JP"), unit: "件" },
+    { label: "平均取引単価", value: summary.totalCount ? fmtYen(summary.avgOrder) : "―" }
+  ];
+  tiles.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "stat-tile";
+    const l = document.createElement("div");
+    l.className = "label";
+    l.textContent = t.label;
+    const v = document.createElement("div");
+    v.className = "value";
+    v.textContent = t.value;
+    if (t.unit) {
+      const u = document.createElement("span");
+      u.className = "unit";
+      u.textContent = t.unit;
+      v.appendChild(u);
+    }
+    div.appendChild(l);
+    div.appendChild(v);
+    grid.appendChild(div);
+  });
+}
+
+// ---- Monthly column chart ----
+function renderMonthlyChart(monthly) {
+  const container = document.getElementById("monthly-chart");
+  container.innerHTML = "";
+  if (!monthly.length) {
+    container.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "該当するデータがありません";
+    container.appendChild(empty);
+    return;
+  }
+
+  const width = 1000, height = 260;
+  const marginLeft = 56, marginRight = 16, marginTop = 16, marginBottom = 32;
+  const plotW = width - marginLeft - marginRight;
+  const plotH = height - marginTop - marginBottom;
+
+  const maxVal = Math.max(...monthly.map(d => d.sales));
+  const niceMax = Math.ceil((maxVal || 1) / 100000) * 100000;
+  const yTicks = 5;
+
+  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height: height, role: "img", "aria-label": "月別売上推移" });
+
+  // gridlines + y axis labels
+  for (let i = 0; i <= yTicks; i++) {
+    const v = niceMax * i / yTicks;
+    const y = marginTop + plotH - (v / niceMax) * plotH;
+    svg.appendChild(el("line", { x1: marginLeft, x2: width - marginRight, y1: y, y2: y, class: "grid-line" }));
+    const label = el("text", { x: marginLeft - 10, y: y + 4, class: "axis-label", "text-anchor": "end" });
+    label.textContent = fmtCompact(v);
+    svg.appendChild(label);
+  }
+  svg.appendChild(el("line", { x1: marginLeft, x2: width - marginRight, y1: marginTop + plotH, y2: marginTop + plotH, class: "baseline" }));
+
+  const bandW = plotW / monthly.length;
+  const barW = Math.min(64, bandW * 0.42);
+
+  monthly.forEach((d, i) => {
+    const cx = marginLeft + bandW * i + bandW / 2;
+    const barH = (d.sales / niceMax) * plotH;
+    const y = marginTop + plotH - barH;
+
+    const rect = el("path", {
+      d: roundedTopRect(cx - barW / 2, y, barW, barH, 4),
+      class: "bar-col"
+    });
+    rect.addEventListener("pointerenter", evt => {
+      rect.classList.add("active");
+      showTooltip(evt, [d.label, { strong: true, text: fmtYen(d.sales) }]);
+    });
+    rect.addEventListener("pointermove", positionTooltip);
+    rect.addEventListener("pointerleave", () => { rect.classList.remove("active"); hideTooltip(); });
+    svg.appendChild(rect);
+
+    const valueLabel = el("text", { x: cx, y: y - 8, class: "value-label", "text-anchor": "middle" });
+    valueLabel.textContent = fmtCompact(d.sales);
+    svg.appendChild(valueLabel);
+
+    const xLabel = el("text", { x: cx, y: marginTop + plotH + 20, class: "axis-label", "text-anchor": "middle" });
+    xLabel.textContent = d.label;
+    svg.appendChild(xLabel);
+  });
+
+  container.appendChild(svg);
+}
+
+function roundedTopRect(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h} L${x},${y + r} Q${x},${y} ${x + r},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h} Z`;
+}
+function roundedRightRect(x, y, w, h, r) {
+  r = Math.min(r, h / 2, w);
+  if (w <= 0) return `M${x},${y} L${x},${y + h} Z`;
+  return `M${x},${y} L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h - r} Q${x + w},${y + h} ${x + w - r},${y + h} L${x},${y + h} Z`;
+}
+
+// ---- Product ranking horizontal bar chart ----
+function renderProductChart(products) {
+  const chartContainer = document.getElementById("product-chart");
+  const tbody = document.querySelector("#product-table tbody");
+  chartContainer.innerHTML = "";
+  tbody.innerHTML = "";
+
+  if (!products.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "該当するデータがありません";
+    chartContainer.appendChild(empty);
+    return;
+  }
+
+  const totalSales = products.reduce((s, p) => s + p.sales, 0);
+  const sorted = [...products].sort((a, b) => b.sales - a.sales);
+  const maxVal = Math.max(...sorted.map(d => d.sales));
+
+  const rowH = 34, gap = 8;
+  const width = 1000;
+  const marginLeft = 150, marginRight = 90, marginTop = 8, marginBottom = 4;
+  const plotW = width - marginLeft - marginRight;
+  const height = marginTop + marginBottom + sorted.length * (rowH + gap) - gap;
+
+  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height: height, role: "img", "aria-label": "商品別売上ランキング" });
+
+  sorted.forEach((d, i) => {
+    const y = marginTop + i * (rowH + gap);
+    const barW = (d.sales / maxVal) * plotW;
+
+    const nameLabel = el("text", { x: marginLeft - 12, y: y + rowH / 2 + 4, class: "axis-label", "text-anchor": "end" });
+    nameLabel.textContent = d.name;
+    svg.appendChild(nameLabel);
+
+    const rect = el("path", {
+      d: roundedRightRect(marginLeft, y, barW, rowH, 4),
+      class: "bar-row"
+    });
+    const share = (d.sales / totalSales * 100).toFixed(1);
+    rect.addEventListener("pointerenter", evt => {
+      rect.classList.add("active");
+      showTooltip(evt, [
+        d.name,
+        { strong: true, text: fmtYen(d.sales) },
+        { text: `数量 ${d.qty.toLocaleString("ja-JP")}点 ・ 構成比 ${share}%` }
+      ]);
+    });
+    rect.addEventListener("pointermove", positionTooltip);
+    rect.addEventListener("pointerleave", () => { rect.classList.remove("active"); hideTooltip(); });
+    svg.appendChild(rect);
+
+    const valueLabel = el("text", { x: marginLeft + barW + 10, y: y + rowH / 2 + 4, class: "value-label" });
+    valueLabel.textContent = fmtCompact(d.sales);
+    svg.appendChild(valueLabel);
+  });
+
+  chartContainer.appendChild(svg);
+
+  // table
+  sorted.forEach((d, i) => {
+    const tr = document.createElement("tr");
+    const share = (d.sales / totalSales * 100).toFixed(1);
+    const cells = [
+      { text: String(i + 1), cls: "rank" },
+      { text: d.name },
+      { text: d.category },
+      { text: fmtYen(d.sales), cls: "num" },
+      { text: d.qty.toLocaleString("ja-JP"), cls: "num" },
+      { text: share + "%", cls: "num" }
+    ];
+    cells.forEach(c => {
+      const td = document.createElement("td");
+      if (c.cls) td.className = c.cls;
+      td.textContent = c.text;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+// ---- Aggregation from filtered rows ----
+function getFilteredRows() {
+  return ROWS.filter(r =>
+    r[0] >= state.from && r[0] <= state.to && state.categories.has(r[2])
+  );
+}
+
+function computeSummary(rows) {
+  const totalSales = rows.reduce((s, r) => s + r[4], 0);
+  const totalQty = rows.reduce((s, r) => s + r[3], 0);
+  const totalCount = rows.length;
+  return {
+    totalSales, totalQty, totalCount,
+    avgOrder: totalCount ? totalSales / totalCount : 0
+  };
+}
+
+function computeMonthly(rows) {
+  const map = new Map();
+  rows.forEach(r => {
+    const month = r[0].slice(0, 7);
+    map.set(month, (map.get(month) || 0) + r[4]);
+  });
+  return [...map.entries()]
+    .sort((a, b) => a[0] < b[0] ? -1 : 1)
+    .map(([month, sales]) => ({ month, label: `${parseInt(month.slice(5, 7), 10)}月`, sales }));
+}
+
+function computeProducts(rows) {
+  const map = new Map();
+  rows.forEach(r => {
+    const key = r[1];
+    if (!map.has(key)) map.set(key, { name: r[1], category: r[2], sales: 0, qty: 0 });
+    const e = map.get(key);
+    e.sales += r[4];
+    e.qty += r[3];
+  });
+  return [...map.values()];
+}
+
+// ---- Filter bar wiring ----
+const dateFromInput = document.getElementById("date-from");
+const dateToInput = document.getElementById("date-to");
+const presetGroup = document.getElementById("preset-group");
+const categoryGroup = document.getElementById("category-group");
+const datasetGroup = document.getElementById("dataset-group");
+const periodLabel = document.getElementById("period-label");
+const loadError = document.getElementById("load-error");
+
+function renderDatasetTabs() {
+  datasetGroup.querySelectorAll(".cat-check, .text-btn").forEach(el => el.remove());
+
+  if (DATASETS.length > 1) {
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.type = "button";
+    selectAllBtn.className = "text-btn";
+    selectAllBtn.textContent = "全選択";
+    selectAllBtn.addEventListener("click", () => {
+      selectedKeys = new Set(DATASETS.map(d => d.key));
+      activateSelection();
+    });
+    datasetGroup.appendChild(selectAllBtn);
+
+    const selectNoneBtn = document.createElement("button");
+    selectNoneBtn.type = "button";
+    selectNoneBtn.className = "text-btn";
+    selectNoneBtn.textContent = "全解除";
+    selectNoneBtn.addEventListener("click", () => {
+      selectedKeys = new Set();
+      activateSelection();
+    });
+    datasetGroup.appendChild(selectNoneBtn);
+  }
+
+  DATASETS.forEach(ds => {
+    const label = document.createElement("label");
+    label.className = "cat-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = selectedKeys.has(ds.key);
+    input.addEventListener("change", () => {
+      if (input.checked) selectedKeys.add(ds.key); else selectedKeys.delete(ds.key);
+      activateSelection();
+    });
+    const span = document.createElement("span");
+    span.textContent = ds.label;
+    label.appendChild(input);
+    label.appendChild(span);
+    datasetGroup.appendChild(label);
+  });
+}
+
+function activePresetKey() {
+  const match = MONTH_PRESETS.find(p => p.from === state.from && p.to === state.to);
+  return match ? match.key : null;
+}
+
+function renderPresets() {
+  presetGroup.querySelectorAll(".preset-pill").forEach(b => b.remove());
+  const activeKey = activePresetKey();
+  MONTH_PRESETS.forEach(p => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "preset-pill" + (p.key === activeKey ? " active" : "");
+    btn.textContent = p.label;
+    btn.addEventListener("click", () => {
+      state.from = p.from;
+      state.to = p.to;
+      dateFromInput.value = p.from;
+      dateToInput.value = p.to;
+      renderAll();
+    });
+    presetGroup.appendChild(btn);
+  });
+}
+
+function renderCategoryChecks() {
+  categoryGroup.querySelectorAll(".cat-check").forEach(c => c.remove());
+  ALL_CATEGORIES.forEach(cat => {
+    const label = document.createElement("label");
+    label.className = "cat-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = state.categories.has(cat);
+    input.addEventListener("change", () => {
+      if (input.checked) state.categories.add(cat);
+      else state.categories.delete(cat);
+      renderAll();
+    });
+    const span = document.createElement("span");
+    span.textContent = cat;
+    label.appendChild(input);
+    label.appendChild(span);
+    categoryGroup.appendChild(label);
+  });
+}
+
+dateFromInput.addEventListener("change", () => {
+  if (dateFromInput.value) state.from = dateFromInput.value;
+  if (state.from > state.to) state.to = state.from;
+  dateToInput.value = state.to;
+  renderAll();
+});
+dateToInput.addEventListener("change", () => {
+  if (dateToInput.value) state.to = dateToInput.value;
+  if (state.to < state.from) state.from = state.to;
+  dateFromInput.value = state.from;
+  renderAll();
+});
+document.getElementById("reset-btn").addEventListener("click", () => {
+  state.from = PERIOD_MIN;
+  state.to = PERIOD_MAX;
+  state.categories = new Set(ALL_CATEGORIES);
+  dateFromInput.value = state.from;
+  dateToInput.value = state.to;
+  renderAll();
+});
+
+function updatePeriodLabel() {
+  const preset = activePresetKey();
+  if (preset === "all") {
+    periodLabel.textContent = `対象期間: ${PERIOD_MIN} 〜 ${PERIOD_MAX}（全期間）`;
+  } else {
+    periodLabel.textContent = `対象期間: ${state.from} 〜 ${state.to}`;
+  }
+}
+
+function renderAll() {
+  const rows = getFilteredRows();
+  renderStats(computeSummary(rows));
+  renderMonthlyChart(computeMonthly(rows));
+  renderProductChart(computeProducts(rows));
+  renderPresets();
+  updatePeriodLabel();
+}
+
+// ---- CSV読み込み ----
+function parseCSV(text) {
+  const lines = text.split(/\r\n|\n/).filter(l => l.trim().length > 0);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",");
+    if (cols.length < 7) continue;
+    rows.push([cols[0], cols[1], cols[2], parseInt(cols[4], 10), parseInt(cols[6], 10)]);
+  }
+  return rows;
+}
+
+function lastDayOfMonth(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(y, m, 0).getDate();
+  return `${monthKey}-${String(d).padStart(2, "0")}`;
+}
+
+// ---- 永続化: リセットするまでブラウザに保持し、再読み込みしても消えないようにする ----
+const STORAGE_KEY = "salesDashboard.datasets.v2";
+
+function persistDatasets() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ datasets: DATASETS, selectedKeys: [...selectedKeys] }));
+  } catch (e) { /* 保存容量オーバー等は無視して続行する */ }
+}
+
+function restoreDatasets() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed.datasets || !parsed.datasets.length) return false;
+    DATASETS = parsed.datasets;
+    const keys = Array.isArray(parsed.selectedKeys) ? parsed.selectedKeys : [];
+    selectedKeys = new Set(keys.filter(k => DATASETS.some(d => d.key === k)));
+    if (!selectedKeys.size) selectedKeys = new Set(DATASETS.map(d => d.key));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// key（ファイル名）が既存と重なる場合は内容を差し替える。新規なら追加してタブに反映し、選択状態にする
+function addDataset(key, rows, { activate = true } = {}) {
+  const entry = { key, label: key, rows };
+  const idx = DATASETS.findIndex(d => d.key === key);
+  if (idx >= 0) DATASETS[idx] = entry; else DATASETS.push(entry);
+  if (activate) selectedKeys.add(key);
+  renderDatasetTabs();
+  activateSelection();
+}
+
+// 選択中の全データセットを結合して再集計・再描画する
+function activateSelection() {
+  const combined = [];
+  DATASETS.forEach(ds => {
+    if (selectedKeys.has(ds.key)) combined.push(...ds.rows);
+  });
+
+  if (!combined.length) {
+    ROWS = [];
+    clearAllViews();
+    if (!DATASETS.length) {
+      showEmptyPrompt("CSVファイルがまだ読み込まれていません。「＋ CSVファイルを開く」から選択してください。");
+    } else {
+      showEmptyPrompt("データセットが選択されていません。上のチェックボックスから1つ以上選択してください。");
+    }
+    persistDatasets();
+    return;
+  }
+
+  ROWS = combined;
+  PERIOD_MIN = ROWS.reduce((m, r) => r[0] < m ? r[0] : m, ROWS[0][0]);
+  PERIOD_MAX = ROWS.reduce((m, r) => r[0] > m ? r[0] : m, ROWS[0][0]);
+  ALL_CATEGORIES = [...new Set(ROWS.map(r => r[2]))];
+
+  const months = [...new Set(ROWS.map(r => r[0].slice(0, 7)))].sort();
+  MONTH_PRESETS = [
+    { key: "all", label: "全期間", from: PERIOD_MIN, to: PERIOD_MAX },
+    ...months.map(m => ({
+      key: m,
+      label: `${parseInt(m.slice(5, 7), 10)}月`,
+      from: `${m}-01`,
+      to: lastDayOfMonth(m)
+    }))
+  ];
+
+  state.from = PERIOD_MIN;
+  state.to = PERIOD_MAX;
+  state.categories = new Set(ALL_CATEGORIES);
+
+  dateFromInput.min = dateToInput.min = PERIOD_MIN;
+  dateFromInput.max = dateToInput.max = PERIOD_MAX;
+  dateFromInput.value = state.from;
+  dateToInput.value = state.to;
+
+  loadError.hidden = true;
+  renderDatasetTabs();
+  renderCategoryChecks();
+  renderAll();
+  persistDatasets();
+}
+
+function clearAllViews() {
+  presetGroup.querySelectorAll(".preset-pill").forEach(b => b.remove());
+  categoryGroup.querySelectorAll(".cat-check").forEach(c => c.remove());
+  dateFromInput.value = "";
+  dateToInput.value = "";
+  dateFromInput.min = dateFromInput.max = "";
+  dateToInput.min = dateToInput.max = "";
+  document.getElementById("stat-grid").innerHTML = "";
+  document.getElementById("monthly-chart").innerHTML = "";
+  document.getElementById("product-chart").innerHTML = "";
+  document.querySelector("#product-table tbody").innerHTML = "";
+  periodLabel.textContent = "対象期間: —";
+}
+
+function showEmptyPrompt(message) {
+  loadError.hidden = false;
+  loadError.textContent = message;
+}
+
+// ---- ファイル選択・ドラッグ&ドロップ共通処理 ----
+async function handleFiles(files) {
+  for (const file of files) {
+    if (!/\.csv$/i.test(file.name)) {
+      alert(`${file.name} はCSVファイルではありません。`);
+      continue;
+    }
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (!rows.length) {
+        alert(`${file.name} にはデータが含まれていません。`);
+        continue;
+      }
+      addDataset(file.name.replace(/\.csv$/i, ""), rows);
+    } catch (err) {
+      alert(`${file.name} の読み込みに失敗しました: ${err.message}`);
+    }
+  }
+}
+
+// ---- ファイル選択ダイアログ（どのフォルダのCSVでもその場で読み込める） ----
+const fileInput = document.getElementById("file-input");
+document.getElementById("open-file-btn").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", async () => {
+  const files = [...fileInput.files];
+  fileInput.value = "";
+  await handleFiles(files);
+});
+
+// ---- ドラッグ&ドロップ ----
+const dropzone = document.getElementById("dropzone");
+["dragenter", "dragover"].forEach(evt => {
+  dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.add("drag-over");
+  });
+});
+["dragleave", "dragend"].forEach(evt => {
+  dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.remove("drag-over");
+  });
+});
+dropzone.addEventListener("drop", async e => {
+  e.preventDefault();
+  e.stopPropagation();
+  dropzone.classList.remove("drag-over");
+  const files = [...(e.dataTransfer?.files || [])];
+  await handleFiles(files);
+});
+// ページ全体では既定のドロップ動作（ファイルを開いてしまう等）を無効化しておく
+["dragover", "drop"].forEach(evt => {
+  window.addEventListener(evt, e => e.preventDefault());
+});
+
+// ---- データリセット ----
+document.getElementById("dataset-reset-btn").addEventListener("click", () => {
+  DATASETS = [];
+  ROWS = [];
+  selectedKeys = new Set();
+  PERIOD_MIN = null;
+  PERIOD_MAX = null;
+  ALL_CATEGORIES = [];
+  MONTH_PRESETS = [];
+  state.from = null;
+  state.to = null;
+  state.categories = new Set();
+
+  renderDatasetTabs();
+  clearAllViews();
+
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+
+  showEmptyPrompt("CSVファイルがまだ読み込まれていません。「＋ CSVファイルを開く」から選択してください。");
+});
+
+// ---- 起動時: サーバー（serve_dashboard.py）経由なら同じフォルダのCSVを自動で読み込む。
+//      file:// で直接開いた場合や失敗した場合は何もせず、ファイル選択を待つ ----
+async function tryAutoLoadServerFiles() {
+  if (!location.protocol.startsWith("http")) return;
+  try {
+    const res = await fetch("/api/csv-list", { cache: "no-store" });
+    if (!res.ok) return;
+    const files = await res.json();
+    for (const f of files) {
+      try {
+        const key = f.replace(/\.csv$/i, "");
+        if (DATASETS.some(d => d.key === key)) continue; // 復元済みのものは上書きしない
+        const r = await fetch(f, { cache: "no-store" });
+        if (!r.ok) continue;
+        const text = await r.text();
+        const rows = parseCSV(text);
+        if (!rows.length) continue;
+        DATASETS.push({ key, label: key, rows });
+        selectedKeys.add(key);
+      } catch (e) { /* このファイルはスキップ */ }
+    }
+  } catch (e) { /* サーバー未使用（file:// など）: 何もしない */ }
+}
+
+(async () => {
+  restoreDatasets();
+  await tryAutoLoadServerFiles();
+  renderDatasetTabs();
+  if (DATASETS.length) {
+    activateSelection();
+  } else {
+    showEmptyPrompt("CSVファイルがまだ読み込まれていません。「＋ CSVファイルを開く」から選択してください。");
+  }
+})();
+</script>
+</body>
+</html>
